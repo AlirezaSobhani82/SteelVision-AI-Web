@@ -1,0 +1,34 @@
+﻿__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+outputs/uploads/*
+outputs/images/*
+outputs/reports/*
+runs/
+.idea/
+# Frontend dependencies and build output
+frontend/node_modules/
+frontend/dist/
+
+# Local backups and temporary files
+*.backup
+*.bak
+*.corrupted.backup
+*.recovered.jsx
+*.recovered.test.jsx
+
+# Python and generated outputs
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+# Dataset
+data/
+
+# Unused model
+/yolo11n.pt
