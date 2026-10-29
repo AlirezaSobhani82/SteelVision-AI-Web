@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from src.detector import DefectDetector
 from src.schemas import ImageReport
-
+import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -32,12 +32,19 @@ app = FastAPI(
     version="1.0.0"
 )
 
+frontend_url = os.getenv("FRONTEND_URL", "").strip().rstrip("/")
+
+allowed_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
+if frontend_url:
+    allowed_origins.append(frontend_url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
