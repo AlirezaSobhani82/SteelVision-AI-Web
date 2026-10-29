@@ -1,5 +1,10 @@
 from pathlib import Path
 from uuid import uuid4
+import logging
+import os
+import sys
+import time
+
 from PIL import Image, UnidentifiedImageError
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
@@ -9,7 +14,22 @@ from fastapi.staticfiles import StaticFiles
 
 from src.detector import DefectDetector
 from src.schemas import ImageReport
-import os
+
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+log = logging.getLogger("sv")
+
+
+def rss_mb():
+    """مصرف RAM پروسه (فقط روی لینوکس/Render)."""
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS"):
+                    return int(line.split()[1]) / 1024
+    except OSError:
+        pass
+    return -1.0
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -57,6 +77,7 @@ app.mount(
 )
 
 detector = DefectDetector()
+log.info("startup: model loaded, rss=%.0fMB", rss_mb())
 
 
 @app.get("/")
@@ -81,6 +102,9 @@ async def predict(
     file: UploadFile = File(...),
     conf: float = Query(default=0.25, ge=0.0, le=1.0)
 ):
+    t0 = time.time()
+    log.info("predict: received %s, rss=%.0fMB", file.filename, rss_mb())
+
     filename = Path(file.filename or "").name
     extension = Path(filename).suffix.lower()
 
@@ -113,6 +137,8 @@ async def predict(
 
                 destination.write(chunk)
 
+        log.info("predict: saved %d bytes, rss=%.0fMB", size, rss_mb())
+
         if size == 0:
             raise HTTPException(
                 status_code=400,
@@ -129,11 +155,18 @@ async def predict(
                 detail="Uploaded file is not a valid image or is corrupted."
             )
 
+        log.info("predict: starting YOLO, rss=%.0fMB", rss_mb())
+
         report = await run_in_threadpool(
             detector.predict,
             temp_path,
             conf,
             filename
+        )
+
+        log.info(
+            "predict: done in %.1fs, rss=%.0fMB",
+            time.time() - t0, rss_mb()
         )
 
         annotated_filename = Path(
@@ -150,6 +183,7 @@ async def predict(
         raise
 
     except Exception as exc:
+        log.exception("predict: failed")
         raise HTTPException(
             status_code=500,
             detail=f"Image processing failed: {exc}"
@@ -160,5 +194,3 @@ async def predict(
 
         if temp_path.exists():
             temp_path.unlink()
-
-#python -m uvicorn src.main:app --host 127.0.0.1 --port 8000

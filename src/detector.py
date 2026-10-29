@@ -3,8 +3,11 @@ from collections import Counter
 import json
 
 import cv2
+import torch
 from ultralytics import YOLO
 
+# کاهش مصرف CPU/حافظه روی پلن Free
+torch.set_num_threads(1)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -16,6 +19,9 @@ REPORT_OUTPUT_DIR = OUTPUT_DIR / "reports"
 
 IMAGE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 REPORT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# حداکثر ضلع بلند تصویر قبل از استنتاج (برای صرفه‌جویی در RAM)
+MAX_SIDE = 1280
 
 
 class DefectDetector:
@@ -47,13 +53,32 @@ class DefectDetector:
                 "Confidence threshold must be between 0 and 1."
             )
 
-        results = self.model.predict(
-            source=str(image_path),
-            conf=conf,
-            imgsz=640,
-            device="cpu",
-            verbose=False
-        )
+        image = cv2.imread(str(image_path))
+
+        if image is None:
+            raise ValueError("Invalid or unreadable image file.")
+
+        orig_h, orig_w = image.shape[:2]
+
+        # کوچک کردن تصویر بزرگ فقط برای استنتاج
+        scale = MAX_SIDE / max(orig_h, orig_w)
+        if scale < 1:
+            image = cv2.resize(
+                image,
+                (int(orig_w * scale), int(orig_h * scale)),
+                interpolation=cv2.INTER_AREA
+            )
+        else:
+            scale = 1.0
+
+        with torch.inference_mode():
+            results = self.model.predict(
+                source=image,
+                conf=conf,
+                imgsz=640,
+                device="cpu",
+                verbose=False
+            )
 
         result = results[0]
         defects = []
@@ -62,6 +87,11 @@ class DefectDetector:
             class_id = int(box.cls.item())
             confidence = float(box.conf.item())
             x1, y1, x2, y2 = box.xyxy[0].tolist()
+
+            # برگرداندن مختصات به اندازه‌ی تصویر اصلی
+            x1, y1, x2, y2 = (
+                x1 / scale, y1 / scale, x2 / scale, y2 / scale
+            )
 
             defects.append({
                 "class_id": class_id,
@@ -101,8 +131,8 @@ class DefectDetector:
 
         report = {
             "image_name": original_filename or image_path.name,
-            "image_width": int(result.orig_shape[1]),
-            "image_height": int(result.orig_shape[0]),
+            "image_width": orig_w,
+            "image_height": orig_h,
             "total_defects": len(defects),
             "defect_counts": dict(counts),
             "detections": defects,
